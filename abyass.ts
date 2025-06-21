@@ -256,6 +256,12 @@ export class Abyass {
     return JSON.parse(JSON.stringify(this.videoObject));
   }
 
+  public getHighestSource() {
+    const res_id = Math.max(...this.videoObject.sources.map((source) => source.res_id));
+    const source = this.videoObject.sources.find((source) => source.res_id === res_id);
+    return source;
+  }
+
   async extract() {
     const response = await fetch(`https://abysscdn.com/?v=${this.videoId}`);
     if (!response.ok) {
