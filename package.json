@@ -1,0 +1,26 @@
+{
+  "name": "abyass",
+  "module": "index.ts",
+  "type": "module",
+  "private": true,
+  "devDependencies": {
+    "@types/bun": "latest",
+    "@types/jsdom": "^21.1.7"
+  },
+  "peerDependencies": {
+    "typescript": "^5"
+  },
+  "dependencies": {
+    "acorn": "^8.15.0",
+    "astring": "^1.9.0",
+    "jsdom": "^26.1.0",
+    "synchrony": "https://github.com/pencilbsp/synchrony.git"
+  },
+  "scripts": {
+    "test": "bun test"
+  },
+  "exports": {
+    ".": "./index.ts",
+    "./utills": "./utils/index.ts"
+  }
+}

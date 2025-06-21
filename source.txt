@@ -1,0 +1,140 @@
+;
+;
+var F = (function () {
+        var c = true;
+        return function (X, C) {
+            var m = c ? function () {
+                ;
+                if (C) {
+                    var E = C.apply(X, arguments);
+                    return C = null, E;
+                }
+            } : function () {
+            };
+            return c = false, m;
+        };
+    }()), B = F(this, function () {
+        ;
+        return B.toString().search('(((.+)+)+)+$').toString().constructor(B).search('(((.+)+)+)+$');
+    });
+;
+B();
+function t() {
+    ;
+    try {
+        if (!document.getElementById('player')) {
+            return;
+        }
+        const u = document.createElement('div'), r = typeof u === 'object' && 'style' in u && typeof u.setAttribute === 'function' && typeof u.appendChild === 'function';
+        if (!r) {
+            return;
+        }
+        if (!(u instanceof HTMLElement)) {
+            return;
+        }
+        u.innerHTML = '<span></span>';
+        if (!u.outerHTML || !u.innerHTML.includes('span')) {
+            return;
+        }
+    } catch (W) {
+        return;
+    }
+    var I = JSON.parse, U = window.atob, g = 'lOybFPJO3QJbEsXFlOyU35yGF0EhEskQkZRTL0yOIuvSK52T7sEUEqvXlaAT7s19vsnwvf2QL0ysFQiG3OEhEa1Ovs2TL0ybx8HCxukT7qiOx5AUEqi4D8AT7TyrDf2TS6woEawN3aJUEsmTvbEjD0EUEqyGDgWXI0Ehv0jTDQGhI6EhkbRC7fAQvsnwL0ysFQiG3OEhEa1Ovs2TL0ybx8HCxukT7qiOx5AUEqi4D8AT7TyrDf2TSJgW_', H = I(U(g)), V = {
+            pop: [
+                'https://usheebainaut.com/4/7807247',
+                'https://exodusjailhousetarantula.com/2020443/'
+            ]
+        };
+    ;
+    var e = { url: 'wss://halo.idocdn.com' };
+    ;
+    var L = {
+        width: '100%',
+        height: '100%',
+        preload: 'auto',
+        doNotSaveCookies: false,
+        fullscreenOrientationLock: 'none',
+        pipIcon: 'disabled',
+        id: 'ednapnQExyKod7bcXOJqt4SROhPRTpQb',
+        slug: 'DmyBErVlt',
+        md5_id: 16447396,
+        user_id: 2135,
+        domain: 'tqbf7cgj217.globalcdn70.buzz',
+        isOnlyTunnel: false,
+        ads: V,
+        tracker: e,
+        image: 'https://img.freeimagecdn.net/image/DmyBErVlt.jpg',
+        preview: true
+    };
+    ;
+    ;
+    ;
+    ;
+    ;
+    ;
+    ;
+    ;
+    ;
+    ;
+    ;
+    ;
+    ;
+    ;
+    ;
+    ;
+    ;
+    var b = {
+            ...L,
+            ...H
+        }, O = b;
+    if (isUseExtension) {
+        var v = {
+            url: '//bullionglidingscuttle.com/lvesnk.html?zoneid=2036073',
+            width: '300px',
+            height: '250px'
+        };
+        ;
+        ;
+        ;
+        O.ads.banner = v;
+        ;
+    }
+    var k = getParameterByName('sub') || getParameterByName('subtitle') || null, M = getParameterByName('lang') || getParameterByName('sub-lang') || null;
+    if (k) {
+        if (!O.tracks) {
+            O.tracks = [];
+        }
+        O.tracks.push({
+            'file': 'https://cdn.iamcdn.net/proxy/subtitle?url=' + decodeURIComponent(k),
+            'label': decodeURIComponent(M || 'Default'),
+            'default': true
+        });
+    }
+    var P = getParameterByName('thumbnail') || getParameterByName('image') || null;
+    if (P) {
+        O.image = P;
+    }
+    if (O.image) {
+        var o = document.getElementById('overlay');
+        o && (o.style.background = '#000 url(\'' + O.image + '\') center center no-repeat', o.style['background-size'] = 'contain');
+    }
+    window.SoTrym('player').setup(O);
+}
+;
+;
+window.addEventListener('load', () => {
+    ;
+    if (top.location == self.location) {
+        return window.location = 'https://abyss.to';
+    }
+    if (window.SoTrym) {
+        return t();
+    }
+    loadScript('https://iamcdn.net/player/core.lite.v3.js').then(c => {
+        ;
+        if (!c || !window.SoTrym) {
+            return document.write('Your browser is interfering with the loading of essential assets. Please consider disabling extensions and ad blockers, or using an alternative browser.');
+        }
+        return t();
+    });
+});
