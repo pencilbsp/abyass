@@ -324,7 +324,7 @@ export class Abyass {
     if (!this.payload) throw new Error("");
     if (typeof this.payload.media === "string") throw new Error("");
 
-    return this.payload.media.mp4.sources.sort((a, b) => a.size - b.size);
+    return this.payload.media.mp4.sources.sort((a, b) => b.size - a.size)[0];
   }
 
   async extract() {
