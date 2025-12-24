@@ -1,15 +1,11 @@
-import { JSDOM } from "jsdom";
+import md5 from "md5";
 import { dirname, join } from "path";
-import { Deobfuscator } from "synchrony";
-import { readdir, mkdir, rm, unlink } from "fs/promises";
+import { mkdir, readdir, rm, unlink } from "fs/promises";
 
-import { generateKey } from "./utils/utils";
 import { existsSync, statSync } from "fs";
 
 import { Semaphore } from "./utils/semaphore";
-import { CryptoHelper } from "./utils/crypto-helper";
-import { SimpleVideo, type VideoObject } from "./utils/video";
-import { extractPlayerConfig } from "./utils/extract-player-config";
+import { AesCtrHelper } from "./utils/aes-helper";
 
 interface Config {
   resolution: string;
@@ -18,109 +14,136 @@ interface Config {
   headers?: Map<string, string>;
 }
 
+type Source = {
+  sub: string;
+  size: number;
+  label: string;
+  codec: string;
+  res_id: number;
+  status: boolean;
+};
+
+type Media = {
+  mp4: {
+    sources: Source[];
+    domains: string[];
+  };
+};
+
+type Payload = {
+  slug: string;
+  md5_id: number;
+  user_id: number;
+  media: Media | string;
+  config: { poster: boolean; preview: boolean };
+};
+
+type Segment = {
+  key: string;
+  size: number;
+  url: string;
+  partNumber: number;
+  range?: string;
+  urlFristData?: string;
+};
+
 export class Abyass {
   public version = 1;
-  private videoObject!: VideoObject;
-  private cryptoHelper: CryptoHelper;
+  private payload?: Payload;
   private static readonly SEGMENT_SIZE = 2097152;
 
   public readonly DEFAULT_CONCURRENT_DOWNLOAD_LIMIT = 4;
 
   public static readonly HYDRAX_CDN = "https://abysscdn.com";
-  public static readonly VALID_METADATA = /JSON\.parse\((?:window\.|)atob\(["']([^"]+)["']\)\)/;
+  public static readonly VALID_METADATA =
+    /JSON\.parse\((?:window\.|)atob\(["']([^"]+)["']\)\)/;
 
   constructor(private readonly videoId: string) {
     this.videoId = videoId;
-    this.cryptoHelper = new CryptoHelper();
   }
 
-  private getSegmentUrl() {
-    return `https://${this.videoObject.domain}/${this.videoObject.id}`;
+  private async encryptPath(path: string, keySeed: number | string) {
+    const aes = new AesCtrHelper();
+    await aes.expandKey(keySeed);
+    const encrypted = await aes.encrypt(path);
+    const binary =
+      typeof encrypted === "string"
+        ? encrypted
+        : Array.from(encrypted)
+            .map((byte) => String.fromCharCode(byte))
+            .join("");
+    return btoa(btoa(binary).replace(/=/g, "")).replace(/=/g, "");
   }
 
-  private generateRanges(size: number, step: number = Abyass.SEGMENT_SIZE): Array<[number, number]> {
-    const ranges: Array<[number, number]> = [];
-
-    // if the size is less than or equal to step size return a single range
-    if (size <= step) {
-      ranges.push([0, size - 1]);
-      return ranges;
+  public async createSegments(
+    targetLabel?: "1080p" | "720p" | "360p" | string
+  ): Promise<{ baseUrl: string; segments: Segment[]; source: Source }> {
+    if (!this.payload) {
+      throw new Error("Payload chưa được nạp, hãy gọi extract() trước.");
+    }
+    if (typeof this.payload.media === "string") {
+      throw new Error("Payload media chưa được giải mã.");
     }
 
-    let start = 0;
-    while (start < size) {
-      const end = Math.min(start + step - 1, size - 1); // trừ 1 để tránh overlap
-      ranges.push([start, end]);
-      start = end + 1; // bắt đầu từ vị trí tiếp theo
+    const { domains } = this.payload.media.mp4;
+    const sources = this.payload.media.mp4.sources.sort(
+      (a, b) => b.size - a.size
+    );
+
+    const source = targetLabel
+      ? sources.find(
+          (item) => item.label === targetLabel && item.codec === "h264"
+        ) ?? sources[0]
+      : sources[0];
+    if (!source) throw new Error("Video này không có nguồn media nào");
+
+    let domain = domains.find((item) => item.includes(source.sub));
+    if (!domain) {
+      domain = domains[source.size % domains.length];
     }
+    if (!domain) throw new Error("Video này không có domain nạp dữ liệu");
 
-    return ranges;
-  }
+    const baseUrl =
+      "https://" +
+      domain +
+      "/mp4/" +
+      this.payload.md5_id +
+      "/" +
+      source.res_id +
+      "/" +
+      source.size +
+      "/" +
+      Abyass.SEGMENT_SIZE;
 
-  private async generateSegmentsBody(simpleVideo: SimpleVideo): Promise<Record<number, string>> {
-    const fragmentList: Record<number, string> = {};
-    await this.cryptoHelper.expandKey(generateKey(simpleVideo.slug));
+    const { pathname, origin, search } = new URL(baseUrl);
+    const totalParts = Math.ceil(source.size / Abyass.SEGMENT_SIZE);
+    const segments: Segment[] = [];
 
-    const ranges = this.generateRanges(simpleVideo.size);
-
-    for (const [index, range] of ranges.entries()) {
-      const body = {
-        ...simpleVideo,
-        range: { start: range[0], end: range[1] },
-      };
-      const encryptedBody = await this.cryptoHelper.encrypt(JSON.stringify(body));
-      fragmentList[index] = encryptedBody;
-    }
-
-    return fragmentList;
-  }
-
-  private async *requestSegment(url: string, body: string, chunkSize: number = 65536) {
-    const response = await fetch(url, {
-      method: "POST",
-      body: JSON.stringify({ hash: body }),
-      headers: {
-        "content-type": "application/json",
-        origin: Abyass.HYDRAX_CDN,
-      },
-    });
-
-    if (!response.ok) {
-      throw new Error(`Failed to request segment: ${response.statusText}`);
-    }
-
-    if (!response.body) {
-      throw new Error("Response body is null");
-    }
-
-    const reader = response.body.getReader();
-
-    let buffer = new Uint8Array(0); // Buffer tạm thời để lưu các chunk
-
-    // Đọc các chunk từ stream và yield mỗi chunk có kích thước tùy chỉnh
-    while (true) {
-      const { done, value } = await reader.read();
-
-      if (done) break; // Khi không còn dữ liệu nữa, kết thúc
-
-      // Nối phần dữ liệu mới vào buffer
-      buffer = new Uint8Array([...buffer, ...value]);
-
-      // Nếu buffer đủ kích thước chunkSize, yield ra chunk đó
-      while (buffer.length >= chunkSize) {
-        const chunk = buffer.slice(0, chunkSize);
-        buffer = buffer.slice(chunkSize); // Cắt buffer còn lại
-        yield chunk;
+    for (let partNumber = 0; partNumber < totalParts; partNumber++) {
+      let partSize = Abyass.SEGMENT_SIZE;
+      if (partNumber + 1 === totalParts) {
+        partSize = source.size % Abyass.SEGMENT_SIZE;
       }
+      const key = md5(pathname) + "/" + partNumber;
+      const encrypted = await this.encryptPath(
+        pathname + "/" + partNumber + search,
+        source.size
+      );
+      segments.push({
+        key,
+        partNumber,
+        size: partSize,
+        url: `${origin}/sora/${source.size}/${encrypted}`,
+      });
     }
 
-    // Yield phần còn lại của buffer nếu có
-    if (buffer.length > 0) {
-      yield buffer;
-    }
+    return { baseUrl, segments, source };
   }
 
-  private async mergeSegmentsIntoMp4File(segmentFolderPath: string, output: string): Promise<void> {
+  private async mergeSegmentsIntoMp4File(
+    segmentFolderPath: string,
+    output: string
+  ): Promise<void> {
     const files = await readdir(segmentFolderPath);
     const segmentFiles = files
       .filter((file) => file.startsWith("segment_"))
@@ -150,11 +173,15 @@ export class Abyass {
 
   private async initializeDownloadTempDir(
     config: Config,
-    simpleVideo: SimpleVideo,
-    totalSegments: number
+    segments: Segment[],
+    source: Source
   ): Promise<{ path: string; remainingSegments: number[] }> {
-    const tempFolderName = `temp_${simpleVideo.slug}_${simpleVideo.label}`;
-    const tempFolder = join(dirname(config.outputFile || process.cwd()), tempFolderName);
+    const tempFolderName = `temp_${this.payload?.slug}_${source.label}`;
+    const tempFolder = join(
+      dirname(config.outputFile || process.cwd()),
+      tempFolderName
+    );
+    const totalSegments = segments.length;
 
     if (existsSync(tempFolder) && statSync(tempFolder).isDirectory()) {
       const existingSegments: number[] = [];
@@ -162,8 +189,14 @@ export class Abyass {
 
       for (const file of files) {
         const filePath = join(tempFolder, file);
-        if (statSync(filePath).isFile() && /segment_\d+/.test(file) && statSync(filePath).size < Abyass.SEGMENT_SIZE) {
-          await unlink(filePath);
+        if (statSync(filePath).isFile() && /segment_\d+/.test(file)) {
+          const num = parseInt(file.replace("segment_", ""));
+          const expectedSize = segments[num]?.size || Abyass.SEGMENT_SIZE;
+          if (!isNaN(num) && statSync(filePath).size < expectedSize) {
+            await unlink(filePath);
+          } else if (!isNaN(num)) {
+            existingSegments.push(num);
+          }
         } else {
           const num = parseInt(file.replace("segment_", ""));
           if (!isNaN(num)) {
@@ -172,8 +205,13 @@ export class Abyass {
         }
       }
 
-      const allSegmentNames = Array.from({ length: totalSegments }, (_, i) => i);
-      const missingSegmentNames = allSegmentNames.filter((num) => !existingSegments.includes(num));
+      const allSegmentNames = Array.from(
+        { length: totalSegments },
+        (_, i) => i
+      );
+      const missingSegmentNames = allSegmentNames.filter(
+        (num) => !existingSegments.includes(num)
+      );
 
       return {
         path: tempFolder,
@@ -193,47 +231,73 @@ export class Abyass {
   // Thay đổi signature của downloadVideo:
   async downloadVideo(
     config: Config,
-    onProgress?: (percent: number, downloadedBytes: number, totalBytes: number) => void
+    onProgress?: (
+      percent: number,
+      downloadedBytes: number,
+      totalBytes: number
+    ) => void
   ): Promise<void> {
-    const simpleVideo = SimpleVideo.fromVideoObject(this.videoObject, config.resolution);
-    const totalBytes = simpleVideo.size; // tổng số bytes của video
+    const { segments, source } = await this.createSegments(config.resolution);
 
-    const segmentBodies = await this.generateSegmentsBody(simpleVideo);
-    const segmentUrl = this.getSegmentUrl();
-    await this.cryptoHelper.expandKey(generateKey(simpleVideo.size));
-
-    const tempDir = await this.initializeDownloadTempDir(config, simpleVideo, Object.keys(segmentBodies).length);
+    const tempDir = await this.initializeDownloadTempDir(
+      config,
+      segments,
+      source
+    );
 
     const segmentsToDownload =
       tempDir.remainingSegments.length > 0
-        ? Object.entries(segmentBodies).filter(([idx]) => tempDir.remainingSegments.includes(Number(idx)))
-        : Object.entries(segmentBodies);
+        ? segments
+            .map((segment, index) => [index, segment] as const)
+            .filter(([idx]) => tempDir.remainingSegments.includes(idx))
+        : segments.map((segment, index) => [index, segment] as const);
 
-    const semaphore = new Semaphore(config.connections || this.DEFAULT_CONCURRENT_DOWNLOAD_LIMIT);
+    const headers = new Headers({
+      referer: Abyass.HYDRAX_CDN + "/",
+      "user-agent":
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36",
+    });
+    if (config.headers) {
+      for (const [key, value] of config.headers) {
+        headers.set(key, value);
+      }
+    }
+
+    const semaphore = new Semaphore(
+      config.connections || this.DEFAULT_CONCURRENT_DOWNLOAD_LIMIT
+    );
 
     let downloadedBytes = 0;
 
-    const downloadSegmentTask = async (index: number, body: string): Promise<void> => {
+    const downloadSegmentTask = async (
+      index: number,
+      segment: Segment
+    ): Promise<void> => {
       const release = await semaphore.acquire();
       try {
-        let isHeader = true;
         const file = Bun.file(join(tempDir.path, `segment_${index}`));
         const writer = file.writer();
 
-        for await (const chunk of this.requestSegment(segmentUrl, body)) {
-          const data = isHeader
-            ? await (async () => {
-                isHeader = false;
-                return this.cryptoHelper.decrypt(chunk);
-              })()
-            : chunk;
-
-          writer.write(data);
-          // cập nhật progress
-          downloadedBytes += typeof data === "string" ? data.length : data.byteLength;
+        console.log(segment.url);
+        const response = await fetch(segment.url, { headers });
+        if (!response.ok) {
+          throw new Error(`Failed to fetch segment: ${response.statusText}`);
+        }
+        if (!response.body) {
+          throw new Error("Response body is null");
+        }
+        const reader = response.body.getReader();
+        for (;;) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          writer.write(value);
+          downloadedBytes += value.byteLength;
           if (onProgress) {
-            const percent = Math.min(100, (downloadedBytes / totalBytes) * 100);
-            onProgress(percent, downloadedBytes, totalBytes);
+            const percent = Math.min(
+              100,
+              (downloadedBytes / source.size) * 100
+            );
+            onProgress(percent, downloadedBytes, source.size);
           }
         }
 
@@ -244,7 +308,11 @@ export class Abyass {
     };
 
     // chạy download
-    await Promise.all(segmentsToDownload.map(([idx, body]) => downloadSegmentTask(Number(idx), body)));
+    await Promise.all(
+      segmentsToDownload.map(([idx, segment]) =>
+        downloadSegmentTask(idx, segment)
+      )
+    );
 
     // sau khi xong merge file
     if (config.outputFile) {
@@ -252,14 +320,11 @@ export class Abyass {
     }
   }
 
-  public getVideoObject(): VideoObject {
-    return JSON.parse(JSON.stringify(this.videoObject));
-  }
-
   public getHighestSource() {
-    const res_id = Math.max(...this.videoObject.sources.map((source) => source.res_id));
-    const source = this.videoObject.sources.find((source) => source.res_id === res_id);
-    return source;
+    if (!this.payload) throw new Error("");
+    if (typeof this.payload.media === "string") throw new Error("");
+
+    return this.payload.media.mp4.sources.sort((a, b) => a.size - b.size);
   }
 
   async extract() {
@@ -267,24 +332,28 @@ export class Abyass {
     if (!response.ok) {
       throw new Error(`Failed to fetch video response: ${response.statusText}`);
     }
-    const html = await response.text();
+    let html = await response.text();
+    html = html.replace(/\s\s+/, " ");
+    const datas_string = html.match(/datas\s=\s"(.*?)";/)?.[1];
 
-    const {
-      window: { document },
-    } = new JSDOM(html);
+    if (!datas_string) throw new Error("");
 
-    const scripts = Array.from(document.querySelectorAll("script"));
-    const maxLength = Math.max(...scripts.map(({ textContent }) => (textContent ? textContent.length : 0)));
+    this.payload = JSON.parse(atob(datas_string));
 
-    const script = scripts.find(({ textContent }) => (textContent ? textContent.length === maxLength : false));
-
-    if (!script || !script.textContent) {
-      throw new Error("No suitable script found to extract encrypted string");
+    if (typeof this.payload?.media === "string") {
+      const aes = new AesCtrHelper();
+      const key = [
+        this.payload.user_id,
+        this.payload.slug,
+        this.payload.md5_id,
+      ].join(":");
+      await aes.expandKey(key);
+      const decrypted = await aes.decrypt(this.payload.media);
+      const mediaText =
+        typeof decrypted === "string"
+          ? decrypted
+          : new TextDecoder().decode(decrypted);
+      this.payload.media = JSON.parse(mediaText);
     }
-
-    const deobfuscator = new Deobfuscator();
-    const content = await deobfuscator.deobfuscateSource(script.textContent);
-
-    this.videoObject = extractPlayerConfig(content);
   }
 }
