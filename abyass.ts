@@ -278,7 +278,6 @@ export class Abyass {
         const file = Bun.file(join(tempDir.path, `segment_${index}`));
         const writer = file.writer();
 
-        console.log(segment.url);
         const response = await fetch(segment.url, { headers });
         if (!response.ok) {
           throw new Error(`Failed to fetch segment: ${response.statusText}`);
