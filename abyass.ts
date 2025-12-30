@@ -75,6 +75,10 @@ export class Abyass {
     return btoa(btoa(binary).replace(/=/g, "")).replace(/=/g, "");
   }
 
+  public getPayload() {
+    return this.payload;
+  }
+
   public async createSegments(
     targetLabel?: "1080p" | "720p" | "360p" | string
   ): Promise<{ baseUrl: string; segments: Segment[]; source: Source }> {
